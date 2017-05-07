@@ -1,66 +1,102 @@
-defmodule Rumbl.VideoControllerTest do
-  use Rumbl.ConnCase
+#---
+# Excerpted from "Programming Phoenix",
+# published by The Pragmatic Bookshelf.
+# Copyrights apply to this code. It may not be used to create training material,
+# courses, books, articles, and the like. Contact us if you are in doubt.
+# We make no guarantees that this code is fit for any purpose.
+# Visit http://www.pragmaticprogrammer.com/titles/phoenix for more book information.
+#---
+defmodule Rumbl.VideoController do
+  use Rumbl.Web, :controller
 
   alias Rumbl.Video
-  @valid_attrs %{description: "some content", title: "some content", url: "some content"}
-  @invalid_attrs %{}
 
-  test "lists all entries on index", %{conn: conn} do
-    conn = get conn, video_path(conn, :index)
-    assert html_response(conn, 200) =~ "Listing videos"
+  plug :scrub_params, "video" when action in [:create, :update]
+
+  alias Rumbl.Category
+
+  plug :load_categories when action in [:new, :create, :edit, :update]
+
+  defp load_categories(conn, _) do
+    query =
+      Category
+      |> Category.alphabetical
+      |> Category.names_and_ids
+    categories = Repo.all query
+    assign(conn, :categories, categories)
   end
 
-  test "renders form for new resources", %{conn: conn} do
-    conn = get conn, video_path(conn, :new)
-    assert html_response(conn, 200) =~ "New video"
+  def action(conn, _) do
+    apply(__MODULE__, action_name(conn),
+          [conn, conn.params, conn.assigns.current_user])
   end
 
-  test "creates resource and redirects when data is valid", %{conn: conn} do
-    conn = post conn, video_path(conn, :create), video: @valid_attrs
-    assert redirected_to(conn) == video_path(conn, :index)
-    assert Repo.get_by(Video, @valid_attrs)
+  def index(conn, _params, user) do
+    videos = Repo.all(user_videos(user))
+
+    render(conn, "index.html", videos: videos)
   end
 
-  test "does not create resource and renders errors when data is invalid", %{conn: conn} do
-    conn = post conn, video_path(conn, :create), video: @invalid_attrs
-    assert html_response(conn, 200) =~ "New video"
+  def show(conn, %{"id" => id}, user) do
+    video = Repo.get!(user_videos(user), id)
+    render(conn, "show.html", video: video)
   end
 
-  test "shows chosen resource", %{conn: conn} do
-    video = Repo.insert! %Video{}
-    conn = get conn, video_path(conn, :show, video)
-    assert html_response(conn, 200) =~ "Show video"
+  def new(conn, _params, user) do
+    changeset =
+      user
+      |> build_assoc(:videos)
+      |> Video.changeset()
+
+    render(conn, "new.html", changeset: changeset)
   end
 
-  test "renders page not found when id is nonexistent", %{conn: conn} do
-    assert_error_sent 404, fn ->
-      get conn, video_path(conn, :show, -1)
+  def create(conn, %{"video" => video_params}, user) do
+    changeset =
+      user
+      |> build_assoc(:videos)
+      |> Video.changeset(video_params)
+
+    case Repo.insert(changeset) do
+      {:ok, _video} ->
+        conn
+        |> put_flash(:info, "Video created successfully.")
+        |> redirect(to: video_path(conn, :index))
+      {:error, changeset} ->
+        render(conn, "new.html", changeset: changeset)
     end
   end
 
-  test "renders form for editing chosen resource", %{conn: conn} do
-    video = Repo.insert! %Video{}
-    conn = get conn, video_path(conn, :edit, video)
-    assert html_response(conn, 200) =~ "Edit video"
+  def edit(conn, %{"id" => id}, user) do
+    video = Repo.get!(user_videos(user), id)
+    changeset = Video.changeset(video)
+    render(conn, "edit.html", video: video, changeset: changeset)
   end
 
-  test "updates chosen resource and redirects when data is valid", %{conn: conn} do
-    video = Repo.insert! %Video{}
-    conn = put conn, video_path(conn, :update, video), video: @valid_attrs
-    assert redirected_to(conn) == video_path(conn, :show, video)
-    assert Repo.get_by(Video, @valid_attrs)
+  def update(conn, %{"id" => id, "video" => video_params}, user) do
+    video = Repo.get!(user_videos(user), id)
+    changeset = Video.changeset(video, video_params)
+
+    case Repo.update(changeset) do
+      {:ok, video} ->
+        conn
+        |> put_flash(:info, "Video updated successfully.")
+        |> redirect(to: video_path(conn, :show, video))
+      {:error, changeset} ->
+        render(conn, "edit.html", video: video, changeset: changeset)
+    end
   end
 
-  test "does not update chosen resource and renders errors when data is invalid", %{conn: conn} do
-    video = Repo.insert! %Video{}
-    conn = put conn, video_path(conn, :update, video), video: @invalid_attrs
-    assert html_response(conn, 200) =~ "Edit video"
+  def delete(conn, %{"id" => id}, user) do
+    video = Repo.get!(user_videos(user), id)
+    Repo.delete!(video)
+
+    conn
+    |> put_flash(:info, "Video deleted successfully.")
+    |> redirect(to: video_path(conn, :index))
   end
 
-  test "deletes chosen resource", %{conn: conn} do
-    video = Repo.insert! %Video{}
-    conn = delete conn, video_path(conn, :delete, video)
-    assert redirected_to(conn) == video_path(conn, :index)
-    refute Repo.get(Video, video.id)
+  defp user_videos(user) do
+    assoc(user, :videos)
   end
 end
